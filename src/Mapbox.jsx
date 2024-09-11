@@ -7,7 +7,7 @@ mapboxgl.accessToken = 'pk.eyJ1IjoidGFsaGF3YXFxYXMxNCIsImEiOiJjbHBreHhscWEwMWU4M
 
 const MapboxMap = ({ layers }) => {
   const mapContainerRef = useRef(null);
-  const mapRef = useRef(null); 
+  const mapRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const initializeMap = useCallback(() => {
@@ -67,17 +67,46 @@ const MapboxMap = ({ layers }) => {
           data: layer.data
         });
 
-        map.addLayer({
-          id: layerId,
-          type: 'circle',
-          source: layerId,
-          paint: {
-            'circle-color': '#FF0000',
-            'circle-radius': 5
-          }
-        });
+        // Determine the layer type based on the feature's geometry
+        const layerType = layer.data.features[0]?.geometry.type;
+
+        if (layerType === 'Point') {
+          // Handle Point geometry
+          map.addLayer({
+            id: layerId,
+            type: 'circle',
+            source: layerId,
+            paint: {
+              'circle-color': '#FF0000',
+              'circle-radius': 5
+            }
+          });
+        } else if (layerType === 'LineString' || layerType === 'MultiLineString') {
+          // Handle LineString and MultiLineString geometry
+          map.addLayer({
+            id: layerId,
+            type: 'line',
+            source: layerId,
+            paint: {
+              'line-color': '#0000FF',
+              'line-width': 2
+            }
+          });
+        } else if (layerType === 'Polygon' || layerType === 'MultiPolygon') {
+          // Handle Polygon and MultiPolygon geometry
+          map.addLayer({
+            id: layerId,
+            type: 'fill',
+            source: layerId,
+            paint: {
+              'fill-color': '#00FF00',
+              'fill-opacity': 0.5
+            }
+          });
+        }
       }
 
+      // Set layer visibility
       map.setLayoutProperty(layerId, 'visibility', layer.visible ? 'visible' : 'none');
       hasVisibleLayers = true;
 
@@ -85,12 +114,17 @@ const MapboxMap = ({ layers }) => {
       const data = layer.data;
       if (data.features) {
         data.features.forEach(feature => {
-          if (feature.geometry.type === 'Point') {
+          const geometryType = feature.geometry.type;
+          if (geometryType === 'Point') {
             bounds.extend(feature.geometry.coordinates);
-          } else if (feature.geometry.type === 'Polygon') {
-            feature.geometry.coordinates[0].forEach(coord => bounds.extend(coord));
-          } else if (feature.geometry.type === 'MultiPolygon') {
-            feature.geometry.coordinates.flat(2).forEach(coord => bounds.extend(coord));
+          } else if (geometryType === 'LineString') {
+            feature.geometry.coordinates.forEach(coord => bounds.extend(coord));
+          } else if (geometryType === 'Polygon' || geometryType === 'MultiPolygon') {
+            const coordinates = geometryType === 'Polygon'
+              ? feature.geometry.coordinates[0] // Outer boundary of the polygon
+              : feature.geometry.coordinates.flat(2); // MultiPolygon flattened coordinates
+
+            coordinates.forEach(coord => bounds.extend(coord));
           }
         });
       }
@@ -114,7 +148,60 @@ const MapboxMap = ({ layers }) => {
 
   const handleThemeChange = (newTheme) => {
     if (mapRef.current) {
-      mapRef.current.setStyle(`mapbox://styles/mapbox/${newTheme}`);
+      const map = mapRef.current;
+
+      // Save the current layers and sources
+      const existingLayers = layers.map(layer => ({
+        id: `geojson-layer-${layer.id}`,
+        data: layer.data,
+        visible: layer.visible
+      }));
+
+      map.setStyle(`mapbox://styles/mapbox/${newTheme}`); // Set the new theme
+
+      // Once the new style is loaded, re-add the layers and sources
+      map.once('styledata', () => {
+        existingLayers.forEach(layer => {
+          if (!map.getSource(layer.id)) {
+            map.addSource(layer.id, { type: 'geojson', data: layer.data });
+
+            // Check the geometry type and add the appropriate layer type
+            const layerType = layer.data.features[0]?.geometry.type;
+            if (layerType === 'Point') {
+              map.addLayer({
+                id: layer.id,
+                type: 'circle',
+                source: layer.id,
+                paint: {
+                  'circle-color': '#FF0000',
+                  'circle-radius': 5
+                }
+              });
+            } else if (layerType === 'LineString' || layerType === 'MultiLineString') {
+              map.addLayer({
+                id: layer.id,
+                type: 'line',
+                source: layer.id,
+                paint: {
+                  'line-color': '#0000FF',
+                  'line-width': 2
+                }
+              });
+            } else if (layerType === 'Polygon' || layerType === 'MultiPolygon') {
+              map.addLayer({
+                id: layer.id,
+                type: 'fill',
+                source: layer.id,
+                paint: {
+                  'fill-color': '#00FF00',
+                  'fill-opacity': 0.5
+                }
+              });
+            }
+          }
+          map.setLayoutProperty(layer.id, 'visibility', layer.visible ? 'visible' : 'none');
+        });
+      });
     }
   };
 
